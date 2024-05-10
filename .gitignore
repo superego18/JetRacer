@@ -14,3 +14,7 @@ jetracer/record/
 jetracer/capture/
 
 *.ipynb
+
+git_token.txt
+
+jetracer/dataset/
