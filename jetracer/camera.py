@@ -5,7 +5,7 @@ from typing import Sequence
 import argparse
 import cv2
 import datetime
-import glob
+# import glob
 import logging
 import numpy as np
 import os
@@ -13,6 +13,13 @@ import time
 
 import pygame
 from jetracer.nvidia_racecar import NvidiaRacecar
+
+# for model inference
+import torch
+# from ultralytics.utils.plotting import Annotator
+# from ultralytics import YOLO
+# import supervision as sv
+# import torchvision.transforms as transforms
 
 # from jtop import jtop # Use this to monitor compute usage (for Jetson Nano)
 
@@ -44,7 +51,8 @@ class Camera:
         stream: bool = False,
         save: bool = False,
         log: bool = True,
-        capture: bool = False
+        capture: bool = False,
+        inference: bool = False
     ) -> None:
         self.sensor_id = sensor_id
         self.width = width
@@ -60,6 +68,7 @@ class Camera:
         self.log = log
         self.model = None
         self.capture = capture
+        self.inference = inference
 
         # Check if OpenCV is built with GStreamer support
         # print(cv2.getBuildInformation())
@@ -115,6 +124,7 @@ class Camera:
         Streaming camera feed
         """
         if self.stream:
+            print("Streaming is started now!")
             cv2.namedWindow(self.window_title)
 
         if self.cap[0].isOpened():
@@ -132,6 +142,69 @@ class Camera:
                         print(f"FPS: {1 / (time.time() - t0):.2f}")
 
                     if self.stream:
+                        
+                        if self.inference:
+                            
+                            # 모델 경로
+                            model_path = '/home/ircv3/HYU-2024-Embedded/jetracer/model/yolov8n_traffic_sign_20240510_e32b16.pt'
+
+                            # 모델 로드
+                            checkpoint = torch.load(model_path, map_location=torch.device('cpu'))
+
+                            # 모델 추출
+                            model = checkpoint['model']
+
+                            # 모델을 CUDA 장치로 이동
+                            device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+                            model = model.to(device)
+                            
+                            img_tensor = torch.from_numpy(frame) # [540, 960, 3]
+                            img_tensor = img_tensor.half() # to halftensor, float16
+                            # 입력 데이터를 채널 순서에 맞게 변환
+                            img_tensor = img_tensor.permute(2, 0, 1)  # 채널 순서 변경 [3, 540, 960]
+
+                            # 배치 차원 추가
+                            img_tensor = img_tensor.unsqueeze(0)  # [1, 3, 540, 960] 형태로 변경
+                            img_tensor = img_tensor.to(device)
+                            
+                            with torch.no_grad():
+                                result = model(img_tensor)[0]
+   
+                            result = result.permute(0, 2, 1) # [batch_size, num_boxes, 4+num_classes] = [1, 10710, 9]
+                            result = result.squeeze() # [10710, 9]
+                            
+                            # 각 박스의 좌표와 클래스 확률을 분리합니다.
+                            boxes = result[..., :4] # [10710, 4]
+                            class_probs = result[..., 4:] # [10710, 5]
+                    
+                            # 결과 출력
+                            # print(class_probs[1, :])
+                            
+                            #TODO: NMS로 바꾸기
+                            
+                            # 평탄화된 텐서에서 가장 큰 값의 인덱스 찾기
+                            max_index_flat = torch.argmax(class_probs)
+
+                            # 평탄화된 인덱스를 원래 형태로 변환
+                            max_row_index = max_index_flat // class_probs.shape[1]
+                            max_col_index = max_index_flat % class_probs.shape[1]
+
+                            # 결과 출력
+                            # print("가장 큰 값의 행 인덱스:", max_row_index.item())
+                            # print("가장 큰 값의 열 인덱스 (클래스 인덱스):", max_col_index.item())
+                            
+                            if class_probs[max_row_index.item()][max_col_index.item()] > 0.5:
+                                # print('찾았다', class_probs[max_row_index.item()][max_col_index.item()])
+                                # print(class_probs[max_row_index.item(), :])
+                                # print(boxes[max_row_index.item(), :])
+                                
+                                class_list = ['right', 'left']
+                                
+                                x, y, w, h = boxes[max_row_index.item(), :][0]
+                                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2) 
+
+                            # cv2.imshow(self.window_title, result)
+                                                                   
                         cv2.imshow(self.window_title, frame)
 
                         if cv2.waitKey(1) == ord('q'):
@@ -153,6 +226,7 @@ class Camera:
             cv2.namedWindow(self.window_title)
             
         if self.cap[0].isOpened():
+            save_num = 0
             try:
                 while True:
                     pygame.event.pump()
@@ -165,6 +239,11 @@ class Camera:
 
                     if self.save:
                         cv2.imwrite(f"{self.save_path}/{timestamp}.jpg", frame)
+                        
+                        save_num += 1
+                        print(f'Save num: {save_num}')
+                        print(f'Save image: {self.save_path}/{timestamp}.jpg')
+                        time.sleep(0.5)
                         self.save = False
 
                     if self.log:
@@ -176,7 +255,7 @@ class Camera:
                         if cv2.waitKey(1) == ord('q'):
                             break
                         elif joystick.get_button(1):
-                            print("###############CAMERA OFF###############")
+                            print("############### CAMERA OFF ###############")
                             break
                         
             except Exception as e:
@@ -227,6 +306,8 @@ if __name__ == '__main__':
         help = 'Print current FPS')
     args.add_argument('--capture',
         action = 'store_true')
+    args.add_argument('--inference',
+        action = 'store_true')
     args = args.parse_args()
 
     cam = Camera(
@@ -236,12 +317,14 @@ if __name__ == '__main__':
         save = args.save,
         stream = args.stream,
         log = args.log,
-        capture = args.capture)
+        capture = args.capture,
+        inference = args.inference)
+
 
     while running:
         pygame.event.pump()
         if(joystick.get_button(0)):
-            print("###############CAMERA ON###############")
+            print("############### CAMERA ON ###############")
             if args.capture:
                 cam.capt()
             else:
