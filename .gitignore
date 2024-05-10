@@ -9,3 +9,5 @@ week05/result/*
 *__pycache__*
 
 .vscode
+
+jetracer/record/
