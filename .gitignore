@@ -11,3 +11,6 @@ week05/result/*
 .vscode
 
 jetracer/record/
+jetracer/capture/
+
+*.ipynb

@@ -44,6 +44,7 @@ class Camera:
         stream: bool = False,
         save: bool = False,
         log: bool = True,
+        capture: bool = False
     ) -> None:
         self.sensor_id = sensor_id
         self.width = width
@@ -58,6 +59,7 @@ class Camera:
         self.save = save
         self.log = log
         self.model = None
+        self.capture = capture
 
         # Check if OpenCV is built with GStreamer support
         # print(cv2.getBuildInformation())
@@ -77,6 +79,12 @@ class Camera:
             os.makedirs(self.save_path, exist_ok=True) # if path does not exist, create it
             self.save_path = self.save_path / f'{len(os.listdir(self.save_path)) + 1:06d}'
             os.makedirs(self.save_path, exist_ok=True)
+
+            logging.info(f"Save directory: {self.save_path}")
+        
+        if capture:
+            self.save_path = 'capture'
+            os.makedirs(self.save_path, exist_ok=True) # if path does not exist, create it
 
             logging.info(f"Save directory: {self.save_path}")
 
@@ -137,7 +145,46 @@ class Camera:
             finally:
                 self.cap[0].release()
                 cv2.destroyAllWindows()
+                
+    def capt(self) -> None:
+        "Capture images for making custom dataset (chanju 240510)"
+        
+        if self.stream:
+            cv2.namedWindow(self.window_title)
+            
+        if self.cap[0].isOpened():
+            try:
+                while True:
+                    pygame.event.pump()
+                    t0 = time.time()
+                    timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')
+                    _, frame = self.cap[0].read()
+                    
+                    if joystick.get_button(6):
+                        self.save = True
 
+                    if self.save:
+                        cv2.imwrite(f"{self.save_path}/{timestamp}.jpg", frame)
+                        self.save = False
+
+                    if self.log:
+                        print(f"FPS: {1 / (time.time() - t0):.2f}")
+
+                    if self.stream:
+                        cv2.imshow(self.window_title, frame)
+
+                        if cv2.waitKey(1) == ord('q'):
+                            break
+                        elif joystick.get_button(1):
+                            print("###############CAMERA OFF###############")
+                            break
+                        
+            except Exception as e:
+                print(e)
+            finally:
+                self.cap[0].release()
+                cv2.destroyAllWindows()
+            
     @property
     def frame(self) -> np.ndarray:
         """
@@ -178,6 +225,8 @@ if __name__ == '__main__':
     args.add_argument('--log',
         action = 'store_true',
         help = 'Print current FPS')
+    args.add_argument('--capture',
+        action = 'store_true')
     args = args.parse_args()
 
     cam = Camera(
@@ -186,10 +235,14 @@ if __name__ == '__main__':
         save_path = args.save_path,
         save = args.save,
         stream = args.stream,
-        log = args.log)
+        log = args.log,
+        capture = args.capture)
 
     while running:
         pygame.event.pump()
         if(joystick.get_button(0)):
             print("###############CAMERA ON###############")
-            cam.run()
+            if args.capture:
+                cam.capt()
+            else:
+                cam.run()
