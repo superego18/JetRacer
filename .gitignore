@@ -18,3 +18,4 @@ jetracer/capture/
 git_token.txt
 
 jetracer/dataset/
+jetracer/tmp/

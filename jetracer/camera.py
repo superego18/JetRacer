@@ -117,7 +117,7 @@ class Camera:
             )
         )
 
-    def run(self, model=None) -> None:
+    def run(self, model_traffic=None, model_center=None) -> None:
         """
         Streaming camera feed
         """
@@ -142,8 +142,28 @@ class Camera:
                     if self.stream:
                         
                         if self.inference:
-                            result = model.predict(frame)                 
-                            cv2.imshow(self.window_title, result[0].plot())
+                            
+                            result = model_traffic.predict(frame)
+                            tmp_image_path = '/home/ircv3/HYU-2024-Embedded/jetracer/tmp/tmp_.jpg'
+                            result[0].save(tmp_image_path)
+                            
+                            image_ori = PIL.Image.open(tmp_image_path) # frame: ndarray
+                            width = image_ori.width
+                            height = image_ori.height
+
+                            with torch.no_grad():
+                                image = preprocess(image_ori)
+                                output = model_center(image).detach().cpu().numpy()
+                            x, y = output[0]
+
+                            x = (x / 2 + 0.5) * width
+                            y = (y / 2 + 0.5) * height
+                            print(f'Inferenced road center is ({x}, {y})')
+
+                            image_np = copy.deepcopy(np.asarray(image_ori))
+                            cv2.circle(image_np, (int(x), int(y)), radius=5, color=(255, 0, 0)) 
+                            
+                            cv2.imshow(self.window_title, image_np)
                             
                         else:
                             cv2.imshow(self.window_title, frame)
@@ -262,9 +282,29 @@ if __name__ == '__main__':
         inference = args.inference)
     
     if args.inference: 
+        
+        print('\n\nPLZ wait a little second to load librarys and models\n\n')
+        
         from ultralytics import YOLO
-        model_path = '/home/ircv3/HYU-2024-Embedded/jetracer/model/yolov8n_traffic_sign_20240510_e32b16.pt'
-        model = YOLO(model_path) 
+        model_traffic_path = '/home/ircv3/HYU-2024-Embedded/jetracer/model/yolov8n_traffic_sign_20240510_e32b16.pt'
+        model_traffic = YOLO(model_traffic_path) 
+        
+        import torch
+        import torchvision
+        import copy
+        import PIL.Image
+        from cnn.center_dataset import TEST_TRANSFORMS
+        
+        device = torch.device('cuda')
+        model_center = torchvision.models.alexnet(num_classes=2, dropout=0.0)
+        model_center.load_state_dict(torch.load('/home/ircv3/HYU-2024-Embedded/jetracer/model/road_following_model.pth'))
+        model_center = model_center.to(device)
+            
+        def preprocess(image: PIL.Image):
+            device = torch.device('cuda')    
+            image = TEST_TRANSFORMS(image).to(device)
+            return image[None, ...]
+            
     
     print('\n\nPLZ press button A to start cam running or capture task\n\n')
     while running:
@@ -274,4 +314,4 @@ if __name__ == '__main__':
             if args.capture:
                 cam.capt()
             else:
-                cam.run(model)
+                cam.run(model_traffic, model_center)
