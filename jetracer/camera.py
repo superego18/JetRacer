@@ -39,11 +39,11 @@ class Camera:
     def __init__(
         self,
         sensor_id: int | Sequence[int] = 0,
-        width: int = 1920, # input
-        height: int = 1080, # input
+        width: int = 1920, # input # do not revise
+        height: int = 1080, # input # do not revise
         _width: int = 960, # output
         _height: int = 540, # output
-        frame_rate: int = 30,
+        frame_rate: int = 10,
         flip_method: int = 0, # do not flip (ex: 2 --> flip by vertex)
         window_title: str = "Camera",
         save_path: str = "record",
@@ -125,10 +125,11 @@ class Camera:
             )
         )
 
-    def run(self, model_traffic=None, model_center=None) -> None:
+    def run(self, model_traffic=None, model_center=None, model_center2=None) -> None:
         """
         Streaming camera feed
         """
+        st = time.time()
         
         global cls_dict
         
@@ -139,13 +140,11 @@ class Camera:
         if self.cap[0].isOpened():
             try:
                 while True:
+                    
                     pygame.event.pump()
                     t0 = time.time()
                     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')
                     _, frame = self.cap[0].read()
-                    
-                    # print(type(frame)): <class 'numpy.ndarray'>
-                    # print(frame.shape): (540, 960, 3) = (self._height, self._width, 3)
 
                     if self.save:
                         cv2.imwrite(str(self.save_path / f"{timestamp}.jpg"), frame)
@@ -155,54 +154,32 @@ class Camera:
 
                     if self.stream:    
                         
-                        '''if self.inference:
-                            
-                            st = time.time()
-                            
-                            frame = frame[..., ::-1]
-                            result = model_traffic.predict(frame) # frame: ndarray
-                            tmp_image_path = '/home/ircv3/HYU-2024-Embedded/jetracer/tmp/tmp_.jpg'
-                            result[0].save(tmp_image_path)
-                            
-                            image_ori = PIL.Image.open(tmp_image_path) 
-                            width = image_ori.width
-                            height = image_ori.height
-
-                            with torch.no_grad():
-                                image = preprocess(image_ori)
-                                output = model_center(image).detach().cpu().numpy()
-                            x, y = output[0]
-
-                            x = (x / 2 + 0.5) * width
-                            y = (y / 2 + 0.5) * height
-                            print(f'Inferenced road center is ({x}, {y})')
-
-                            image_np = copy.deepcopy(np.asarray(image_ori))
-                            cv2.circle(image_np, (int(x), int(y)), radius=5, color=(255, 0, 0)) 
-                            
-                            cv2.imshow(self.window_title, image_np)
-                            
-                            fi = time.time()
-                            print(f'time: {fi-st}')'''
-                        
                         if self.inference:
-                            
-                            st = time.time()
                             
                             pil_image = Image.fromarray(frame)
 
                             with torch.no_grad():
                                 image_ts = preprocess(pil_image)
                                 output = model_center(image_ts).detach().cpu().numpy()
+                                output2 = model_center2(image_ts).detach().cpu().numpy()
+                                output3 = model_center3(image_ts).detach().cpu().numpy()
                             
                             x, y = output[0]
 
                             x = (x / 2 + 0.5) * self._width
                             y = (y / 2 + 0.5) * self._height
-                            print(f'Inferenced road center is ({x}, {y})')
-
-                            cv2.circle(frame, (int(x), int(y)), radius=5, color=(255, 0, 0))
+                            # print(f'Inferenced road center is ({x}, {y})')
                             
+                            x2, y2 = output2[0]
+
+                            x2 = (x2 / 2 + 0.5) * self._width
+                            y2 = (y2 / 2 + 0.5) * self._height
+                            
+                            x3, y3 = output3[0]
+
+                            x3 = (x3 / 2 + 0.5) * self._width
+                            y3 = (y3 / 2 + 0.5) * self._height
+
                             results = model_traffic.predict(frame)
  
                             cls = 'none'
@@ -212,12 +189,12 @@ class Camera:
                                     print('clsclscls\t\t\t\t', cls)
                             except:
                                 print(results[0].__dict__['boxes'].cls)
+                                
+                            cv2.circle(frame, (int(x), int(y)), radius=5, color=(255, 0, 0))
+                            cv2.circle(frame, (int(x2), int(y2)), radius=5, color=(0, 255, 0))
+                            cv2.circle(frame, (int(x3), int(y3)), radius=5, color=(0, 0, 255))
                             
                             cv2.imshow(self.window_title, frame)
-                            
-                            fi = time.time()
-                            
-                            print(f'time: {fi-st}')
                         
                         else:
                             cv2.imshow(self.window_title, frame)
@@ -233,6 +210,7 @@ class Camera:
             finally:
                 self.cap[0].release()
                 cv2.destroyAllWindows()
+                exit()
                 
     def capt(self) -> None:
         "Capture images for making custom dataset (chanju 240510)"
@@ -353,6 +331,14 @@ if __name__ == '__main__':
         model_center = torchvision.models.alexnet(num_classes=2, dropout=0.0)
         model_center.load_state_dict(torch.load('/home/ircv3/HYU-2024-Embedded/jetracer/model/road_following_model.pth'))
         model_center = model_center.to(device)
+        
+        model_center2 = torchvision.models.alexnet(num_classes=2, dropout=0.0)
+        model_center2.load_state_dict(torch.load('/home/ircv3/HYU-2024-Embedded/jetracer/model/road_following_model_new_e32.pth'))
+        model_center2 = model_center2.to(device)
+        
+        model_center3 = torchvision.models.alexnet(num_classes=2, dropout=0.0)
+        model_center3.load_state_dict(torch.load('/home/ircv3/HYU-2024-Embedded/jetracer/model/road_following_model_new2_e32.pth'))
+        model_center3 = model_center3.to(device)
             
         def preprocess(image: PIL.Image):
         # def preprocess(image):
@@ -373,6 +359,7 @@ if __name__ == '__main__':
                 cam.capt()
             else:
                 if args.inference:
-                    cam.run(model_traffic, model_center)
+                    cam.run(model_traffic, model_center, model_center2)
+
                 else:
                     cam.run()
