@@ -1,4 +1,0 @@
-dataset/images/frame_000000000.jpg	309	333
-dataset/images/frame_000000001.jpg	326	333
-dataset/images/frame_000000002.jpg	350	333
-dataset/images/frame_000000003.jpg	336	333
