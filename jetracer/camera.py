@@ -26,6 +26,7 @@ logging.getLogger().setLevel(logging.INFO)
 # For headless mode
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 
+
 pygame.init()
 pygame.joystick.init()
 
@@ -38,12 +39,12 @@ class Camera:
     def __init__(
         self,
         sensor_id: int | Sequence[int] = 0,
-        width: int = 1920,
-        height: int = 1080,
-        _width: int = 960,
-        _height: int = 540,
+        width: int = 1920, # input
+        height: int = 1080, # input
+        _width: int = 960, # output
+        _height: int = 540, # output
         frame_rate: int = 30,
-        flip_method: int = 0,
+        flip_method: int = 0, # do not flip (ex: 2 --> flip by vertex)
         window_title: str = "Camera",
         save_path: str = "record",
         stream: bool = False,
@@ -95,9 +96,16 @@ class Camera:
 
             logging.info(f"Save directory: {self.save_path}")
 
-    def gstreamer_pipeline(self, sensor_id: int, flip_method: int) -> str:
+    def gstreamer_pipeline(self, sensor_id: int, flip_method: int) -> str: ## BGR
         """
         Return a GStreamer pipeline for capturing from the CSI camera
+        
+        파이프라인 구성 요소 설명 (by GPT)
+            nvarguscamerasrc: NVIDIA의 Argus 카메라 소스 요소로, CSI 카메라에서 영상을 캡처합니다.
+            video/x-raw(memory:NVMM): 비디오 캡처의 메모리 타입을 NVMM(NVIDIA Memory Management)으로 설정합니다.
+            nvvidconv: NVIDIA 비디오 변환 요소로, 비디오를 변환하고 플립합니다.
+            videoconvert: 비디오 형식을 변환합니다. 
+            appsink: 변환된 비디오 스트림을 응용 프로그램으로 전달합니다.
         """
         return (
             "nvarguscamerasrc sensor-id=%d ! "
@@ -121,8 +129,11 @@ class Camera:
         """
         Streaming camera feed
         """
+        
+        global cls_dict
+        
         if self.stream:
-            print("Streaming is started now!")
+            # print("Streaming is started now!")
             cv2.namedWindow(self.window_title)
 
         if self.cap[0].isOpened():
@@ -132,6 +143,9 @@ class Camera:
                     t0 = time.time()
                     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')
                     _, frame = self.cap[0].read()
+                    
+                    # print(type(frame)): <class 'numpy.ndarray'>
+                    # print(frame.shape): (540, 960, 3) = (self._height, self._width, 3)
 
                     if self.save:
                         cv2.imwrite(str(self.save_path / f"{timestamp}.jpg"), frame)
@@ -139,15 +153,18 @@ class Camera:
                     if self.log:
                         print(f"FPS: {1 / (time.time() - t0):.2f}")
 
-                    if self.stream:
+                    if self.stream:    
                         
-                        if self.inference:
+                        '''if self.inference:
                             
-                            result = model_traffic.predict(frame)
+                            st = time.time()
+                            
+                            frame = frame[..., ::-1]
+                            result = model_traffic.predict(frame) # frame: ndarray
                             tmp_image_path = '/home/ircv3/HYU-2024-Embedded/jetracer/tmp/tmp_.jpg'
                             result[0].save(tmp_image_path)
                             
-                            image_ori = PIL.Image.open(tmp_image_path) # frame: ndarray
+                            image_ori = PIL.Image.open(tmp_image_path) 
                             width = image_ori.width
                             height = image_ori.height
 
@@ -165,6 +182,43 @@ class Camera:
                             
                             cv2.imshow(self.window_title, image_np)
                             
+                            fi = time.time()
+                            print(f'time: {fi-st}')'''
+                        
+                        if self.inference:
+                            
+                            st = time.time()
+                            
+                            pil_image = Image.fromarray(frame)
+
+                            with torch.no_grad():
+                                image_ts = preprocess(pil_image)
+                                output = model_center(image_ts).detach().cpu().numpy()
+                            
+                            x, y = output[0]
+
+                            x = (x / 2 + 0.5) * self._width
+                            y = (y / 2 + 0.5) * self._height
+                            print(f'Inferenced road center is ({x}, {y})')
+
+                            cv2.circle(frame, (int(x), int(y)), radius=5, color=(255, 0, 0))
+                            
+                            results = model_traffic.predict(frame)
+ 
+                            cls = 'none'
+                            try:
+                                for i in range(len(results[0].__dict__['boxes'])):
+                                    cls = cls_dict[int(results[0].__dict__['boxes'].cls.item())]
+                                    print('clsclscls\t\t\t\t', cls)
+                            except:
+                                print(results[0].__dict__['boxes'].cls)
+                            
+                            cv2.imshow(self.window_title, frame)
+                            
+                            fi = time.time()
+                            
+                            print(f'time: {fi-st}')
+                        
                         else:
                             cv2.imshow(self.window_title, frame)
 
@@ -291,7 +345,7 @@ if __name__ == '__main__':
         
         import torch
         import torchvision
-        import copy
+        from PIL import Image
         import PIL.Image
         from cnn.center_dataset import TEST_TRANSFORMS
         
@@ -301,17 +355,24 @@ if __name__ == '__main__':
         model_center = model_center.to(device)
             
         def preprocess(image: PIL.Image):
+        # def preprocess(image):
             device = torch.device('cuda')    
             image = TEST_TRANSFORMS(image).to(device)
             return image[None, ...]
+        
+        cls_dict = {0: 'bus', 1: 'crosswalk', 2: 'left', 3: 'right', 4: 'straight'}
             
     
     print('\n\nPLZ press button A to start cam running or capture task\n\n')
     while running:
         pygame.event.pump()
-        if(joystick.get_button(0)):
-            print("############### CAMERA ON ###############")
+        #  if(joystick.get_button(0)):
+        if True:
+            # print("############### CAMERA ON ###############")
             if args.capture:
                 cam.capt()
             else:
-                cam.run(model_traffic, model_center)
+                if args.inference:
+                    cam.run(model_traffic, model_center)
+                else:
+                    cam.run()
