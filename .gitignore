@@ -19,3 +19,5 @@ git_token.txt
 
 jetracer/dataset/
 jetracer/tmp/
+
+jetracer/model/

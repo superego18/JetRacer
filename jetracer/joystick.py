@@ -14,7 +14,7 @@ joystick = pygame.joystick.Joystick(0)
 joystick.init()
 
 running = True
-throttle_range = (-0.4, 0.4)
+throttle_range = (-0.4, 0.9)
 
 normal = False
 turbo = False
@@ -39,8 +39,7 @@ while running:
         normal, turbo, super_turbo = False, False, False
             
     car.steering = joystick.get_axis(0)
-    # print(car.steering)
-    
+
     if(car.throttle < 0 and prev_cmd >= 0):
         back_start = True
         print('A')
@@ -63,11 +62,11 @@ while running:
         
         
     if(normal):
-        throttle = -joystick.get_axis(3)/4.
+        throttle = -joystick.get_axis(3)/3
         car.throttle = max(throttle_range[0], min(throttle_range[1], throttle))
-        
+
     elif(turbo):
-        throttle = -joystick.get_axis(3)/3.
+        throttle = -joystick.get_axis(3)
         car.throttle = max(throttle_range[0], min(throttle_range[1], throttle))
         
     elif(super_turbo):
@@ -76,7 +75,7 @@ while running:
     
     else:
         car.throttle = 0.0
-
+    print(car.throttle)
     prev_cmd = car.throttle
     
     if(car.throttle < 0 and prev_cmd >= 0):

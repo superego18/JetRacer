@@ -131,7 +131,7 @@ class Camera:
             )
         )
 
-    def run(self, model_traffic=None, model_center=None, cls_dict=None) -> None:
+    def run(self, model_traffic=None, model_center=None, model_left=None, model_right=None, cls_dict=None) -> None:
         
         print("############### CAMERA ON ###############")
         
@@ -139,86 +139,90 @@ class Camera:
             cv2.namedWindow(self.window_title)
 
         if self.cap[0].isOpened():
+            
             try:
-                while True:
-                    
-                    pygame.event.pump()
-                    
-                    t0 = time.time()
-                    
-                    _, frame = self.cap[0].read()
 
-                    if self.save:
-                        timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')
-                        cv2.imwrite(str(self.save_path / f"{timestamp}.jpg"), frame)
+                pygame.event.pump()
+                
+                t0 = time.time()
+                
+                _, frame = self.cap[0].read()
 
-                    if self.inference:
+                if self.save:
+                    timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')
+                    cv2.imwrite(str(self.save_path / f"{timestamp}.jpg"), frame)
+
+                if self.inference:
+                    
+                    # Determine the existence and class of traffic signs
+                    results = model_traffic.predict(frame)
+
+                    # Basic cls value
+                    cls = 5
+                    
+                    # When there are multiple signs, choose the closest one
+                    max_bbox_size = 0
+                    for bbox in results[0].__dict__['boxes']:
                         
-                        # Determine the existence and class of traffic signs
-                        results = model_traffic.predict(frame)
-
-                        # Basic cls value
-                        cls = 5
+                        bbox_size = int(bbox.xywh[0][2]) * int(bbox.xywh[0][3]) 
+                        print(int(bbox.xywh[0][2]), int(bbox.xywh[0][3]))
                         
-                        # When there are multiple signs, choose the closest one
-                        max_bbox_size = 0
-                        for bbox in results[0].__dict__['boxes']:
+                        if bbox_size > max_bbox_size:
+                            max_bbox_size = bbox_size
+                            cls = int(bbox.cls.item())                              
                             
-                            bbox_size = int(bbox.xywh[0][2]) * int(bbox.xywh[0][3]) 
-                            
-                            if bbox_size > max_bbox_size:
-                                max_bbox_size = bbox_size
-                                cls = int(bbox.cls.item())                              
-                                
-                        # Choose the right model according to the traffic sign
-                        pil_image = Image.fromarray(frame)
-                        
-                        with torch.no_grad():
-                            image_ts = preprocess(pil_image)
-                        
-                            # No traffic sign | Crosswalk | Bus | Straight
-                            if cls == 5 or cls == 0 or cls == 1 or cls == 4:
-                                output = model_center(image_ts).detach().cpu().numpy()
-                            # Left
-                            elif cls == 2:
-                                # TODO: Change to model_left
-                                output = model_center(image_ts).detach().cpu().numpy()
-                            # Right
-                            else:
-                                # TODO: Change to model_right
-                                output = model_center(image_ts).detach().cpu().numpy()
-                                               
-                        x, y = output[0]
-                        x = (x / 2 + 0.5) * self._width
-                        y = (y / 2 + 0.5) * self._height
-
-                    if self.stream:
-                        if self.inference:
-                            annotated_frame = results[0].plot()
-                            cv2.circle(annotated_frame, (int(x), int(y)), radius=5, color=(0, 0, 255))
-                            cv2.imshow(self.window_title, annotated_frame)
+                    # Choose the right model according to the traffic sign
+                    pil_image = Image.fromarray(frame)
+                    
+                    with torch.no_grad():
+                        image_ts = preprocess(pil_image)
+                    
+                        # No traffic sign | Crosswalk | Bus | Straight
+                        if cls == 5 or cls == 0 or cls == 1 or cls == 4:
+                            output = model_center(image_ts).detach().cpu().numpy()
+                            color_ = (0, 255, 0)
+                        # Left
+                        elif cls == 2:
+                            output = model_left(image_ts).detach().cpu().numpy()
+                            color_ = (255, 0, 0)
+                        # Right
                         else:
-                            cv2.imshow(self.window_title, frame)
+                            output = model_right(image_ts).detach().cpu().numpy()
+                            color_ = (0, 0, 255)
+                                            
+                    x, y = output[0]
+                    x = (x / 2 + 0.5) * self._width
+                    y = (y / 2 + 0.5) * self._height
 
-                        if cv2.waitKey(1) == ord('q'):
-                            break
-                    if joystick.get_button(1):
-                        print("############### CAMERA OFF ###############")
-                        break
+                if self.stream:
+                    if self.inference:
+                        annotated_frame = results[0].plot()
+                        cv2.circle(annotated_frame, (int(x), int(y)), radius=5, color=color_)
+                        cv2.imshow(self.window_title, annotated_frame)
+                    else:
+                        cv2.imshow(self.window_title, frame)
+
+                #     if cv2.waitKey(1) == ord('q'):
+                #         break
+                # if joystick.get_button(1):
+                #     print("############### CAMERA OFF ###############")
+                #     break
+                
+                if self.log:
+                    print(f'Determined class is {cls_dict[cls]}')
+                    print(f'Inferenced road center is ({x:.1f}, {y:.1f})')
+                    print(f"Real FPS: {1 / (time.time() - t0):.1f}")
                     
-                    if self.log:
-                        print(f'Determined class is {cls_dict[cls]}')
-                        print(f'Inferenced road center is ({x:.1f}, {y:.1f})')
-                        print(f"Real FPS: {1 / (time.time() - t0):.1f}")
+                return x, cls
                         
             except Exception as e:
                 print(e)
 
-            finally:
-                # TODO: Revise cam release
-                self.cap[0].release()
-                cv2.destroyAllWindows()
-                exit()
+            # finally:
+            #     # TODO: Revise cam release
+            #     self.cap[0].release()
+            #     cv2.destroyAllWindows()
+            #     exit()
                 
     def capt(self) -> None:
         "Capture images for making custom dataset (chanju 240510)"
@@ -340,7 +344,13 @@ if __name__ == '__main__':
         model_center.load_state_dict(torch.load('/home/ircv3/HYU-2024-Embedded/jetracer/model/road_following_model_new2_e32.pth'))
         model_center = model_center.to(device)
         
-        # TODO: Add left and right model
+        model_left = torchvision.models.alexnet(num_classes=2, dropout=0.0)
+        model_left.load_state_dict(torch.load('/home/ircv3/HYU-2024-Embedded/jetracer/model/road_following_model_left_b8e64.pth'))
+        model_left = model_left.to(device)
+        
+        model_right = torchvision.models.alexnet(num_classes=2, dropout=0.0)
+        model_right.load_state_dict(torch.load('/home/ircv3/HYU-2024-Embedded/jetracer/model/road_following_model_right_b8e64.pth'))
+        model_right = model_right.to(device)
             
         def preprocess(image: Image):
             device = torch.device('cuda')    
@@ -362,7 +372,6 @@ if __name__ == '__main__':
                 cam.capt()
             else:
                 if args.inference:
-                    # TODO: Add arguments of left and right model
-                    cam.run(model_traffic, model_center, cls_dict)
+                    cam.run(model_traffic, model_center, model_left, model_right, cls_dict)
                 else:
                     cam.run()
