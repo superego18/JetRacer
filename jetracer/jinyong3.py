@@ -419,6 +419,11 @@ while True:
     
     throttle = throttle_zero
     x_sen, cls = cam.run(model_traffic, model_center, model_left, model_right, cls_dict, bool_left, bool_right)
+    if x_sen < 0:
+        x_sen = 0
+    elif x_sen > 960:
+        x_sen = 960
+    
     cls = cls_dict[cls]
 
     if cls == 'left' and cnt_left == 0 and bool_left == False:
