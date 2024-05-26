@@ -21,11 +21,12 @@ TEST_TRANSFORMS = transforms.Compose([
 
 
 class CenterDataset(torch.utils.data.Dataset):
-    def __init__(self, root_dir, random_hflip=True, transform=TRAIN_TRANSFORMS):
+    def __init__(self, root_dir, random_hflip=True, transform=TRAIN_TRANSFORMS, only_use_x=False):
         super(CenterDataset, self).__init__()
         self.root_dir = root_dir
         self.random_hflip = random_hflip
         self.transform = transform
+        self.only_use_x = only_use_x
                 
         with open(os.path.join(root_dir, 'annotation.txt'), 'r') as f:
             self.data = [line.split() for line in f.readlines()]
@@ -59,5 +60,8 @@ class CenterDataset(torch.utils.data.Dataset):
         if self.random_hflip and float(np.random.random(1)) > 0.5:
             image = torch.flip(image, [-1])
             x = -x
+            
+        if self.only_use_x:
+            return image, torch.Tensor([x])
             
         return image, torch.Tensor([x, y])

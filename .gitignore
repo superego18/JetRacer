@@ -21,3 +21,5 @@ jetracer/dataset/
 jetracer/tmp/
 
 jetracer/model/
+
+jetracer/AlexNet_Road_Center_Detection
