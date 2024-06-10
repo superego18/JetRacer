@@ -33,11 +33,11 @@ class Camera:
     def __init__(
         self,
         sensor_id: int | Sequence[int] = 0,
-        width: int = 1920, # input # do not revise
-        height: int = 1080, # input # do not revise
-        _width: int = 960, # output
-        _height: int = 540, # output
-        frame_rate: int = 10,
+        width: int = 1920, # input # do not revise  # [3280, 3280, 1920, 1640, 1280] #[3.4166, 3.4166, 2, 1.70833, 1.333] 
+        height: int = 1080, # input # do not revise # [2464, 1848, 1080, 1232, 720] #[4.56.., 3.422, 2, 2.281.., 1.333]
+        _width: int = 960, # output # value you need
+        _height: int = 540, # output # value you need 
+        frame_rate: int = 10, # value you need # max = [21, 28, ~30, ~30, ~60]
         flip_method: int = 0, # do not flip (ex: 2 --> flip by vertex)
         window_title: str = "Camera",
         save_path: str = "record",
@@ -114,9 +114,9 @@ class Camera:
             appsink: 변환된 비디오 스트림을 응용 프로그램으로 전달합니다.
         """
         return (
-            "nvarguscamerasrc sensor-id=%d ! "
+            "nvarguscamerasrc sensor-id=%d gainrange=\"10 10\" ispdigitalgainrange=\"5 5\" ! "
             "video/x-raw(memory:NVMM), width=(int)%d, height=(int)%d, framerate=(fraction)%d/1 ! "
-            "nvvidconv flip-method=%d ! "
+            "nvvidconv flip-method=%d ! "           
             "video/x-raw, width=(int)%d, height=(int)%d, format=(string)BGRx ! "
             "videoconvert ! "
             "video/x-raw, format=(string)BGR ! appsink"
@@ -212,8 +212,9 @@ class Camera:
                     print(f'Determined class is {cls_dict[cls]}')
                     print(f'Inferenced road center is ({x:.1f}, {y:.1f})')
                     print(f"Real FPS: {1 / (time.time() - t0):.1f}")
-                    
-                return x, cls
+                
+                if self.inference:
+                    return x, cls
                         
             except Exception as e:
                 print(e)
@@ -242,14 +243,18 @@ class Camera:
                     if joystick.get_button(6):
                         self.save = True
 
-                    if self.save:
-                        cv2.imwrite(f"{self.save_path}/{timestamp}.jpg", frame)
+                    # if self.save:
+                    #     cv2.imwrite(f"{self.save_path}/{timestamp}.jpg", frame)
                         
-                        save_num += 1
-                        print(f'Save num: {save_num}')
-                        print(f'Save image: {self.save_path}/{timestamp}.jpg')
-                        time.sleep(0.5)
-                        self.save = False
+                    #     save_num += 1
+                    #     print(f'Save num: {save_num}')
+                    #     print(f'Save image: {self.save_path}/{timestamp}.jpg')
+                    #     time.sleep(0.5)
+                    #     self.save = False
+                    
+                    if self.save:
+                        timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')
+                        cv2.imwrite(f"{self.save_path}/{timestamp}.jpg", frame)
 
                     if self.log:
                         print(f"FPS: {1 / (time.time() - t0):.2f}")

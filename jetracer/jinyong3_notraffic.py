@@ -34,11 +34,11 @@ class Camera:
     def __init__(
         self,
         sensor_id: int | Sequence[int] = 0,
-        width: int = 1920, # input # [3280, 3280, 1920, 1640, 1280]
-        height: int = 1080, # input # [2464, 1848, 1080, 1232, 720]
-        _width: int = 960, # output # value you need # do not revise  
-        _height: int = 540, # output # value you need # do not revise 
-        frame_rate: int = 10, # value you need # max = [21, 28, ~30, ~30, ~60]
+        width: int = 1920, # input # do not revise
+        height: int = 1080, # input # do not revise
+        _width: int = 960, # output
+        _height: int = 540, # output
+        frame_rate: int = 10,
         flip_method: int = 0, # do not flip (ex: 2 --> flip by vertex)
         window_title: str = "Camera",
         save_path: str = "record",
@@ -73,7 +73,6 @@ class Camera:
             raise NotImplementedError("Multiple cameras are not supported yet")
 
         # To flip the image, modify the flip_method parameter (0 and 2 are the most common)
-        # TODO: We don't have to use list. Only 0 value.
         self.cap = [cv2.VideoCapture(self.gstreamer_pipeline(sensor_id=id, flip_method=0), \
                     cv2.CAP_GSTREAMER) for id in self.sensor_id]
         '''
@@ -116,7 +115,7 @@ class Camera:
             appsink: 변환된 비디오 스트림을 응용 프로그램으로 전달합니다.
         """
         return (
-            "nvarguscamerasrc sensor-id=%d gainrange=\"10 10\" ispdigitalgainrange=\"5 5\" ! "
+            "nvarguscamerasrc sensor-id=%d gainrange=\"10 10\" ispdigitalgainrange=\"10 10\" ! "
             "video/x-raw(memory:NVMM), width=(int)%d, height=(int)%d, framerate=(fraction)%d/1 ! "
             "nvvidconv flip-method=%d ! "
             "video/x-raw, width=(int)%d, height=(int)%d, format=(string)BGRx ! "
@@ -133,7 +132,7 @@ class Camera:
             )
         )
 
-    def run(self, model_traffic=None, model_center=None, model_left=None, model_right= None, cls_dict=None, bool_left=False, bool_right=False, bool_straight=False) -> None:
+    def run(self, model_center=None) -> None:
         
         print("############### CAMERA ON ###############")
         
@@ -151,47 +150,14 @@ class Camera:
 
                 # if self.inference:
                     
-                # Determine the existence and class of traffic signs
-                results = model_traffic.predict(frame)
-
-                # Basic cls value
-                cls = 5
-                
-                # When there are multiple signs, choose the closest one
-                if bool_left:
-                    cls = 2
-                elif bool_right:
-                    cls = 3
-                elif bool_straight:
-                    cls = 4
-                else:
-                    max_bbox_size = 0
-                    for bbox in results[0].__dict__['boxes']:
-                        if bbox.conf >= 0.75 and int(bbox.xywh[0][3]) >= 105: # 170, 200
-                            bbox_size = int(bbox.xywh[0][2]) * int(bbox.xywh[0][3]) 
-                            
-                            if bbox_size > max_bbox_size:
-                                max_bbox_size = bbox_size
-                                cls = int(bbox.cls.item())                
-                        
                 # Choose the right model according to the traffic sign
                 pil_image = Image.fromarray(frame)
                 
                 with torch.no_grad():
                     image_ts = preprocess(pil_image)
                 
-                    # No traffic sign | Crosswalk | Bus | Straight
-                    if cls == 5 or cls == 0 or cls == 1 or cls == 4:
-                        output = model_center(image_ts).detach().cpu().numpy()
-                        color_ = (0, 255, 0)
-                    # Left
-                    elif cls == 2:
-                        output = model_left(image_ts).detach().cpu().numpy()
-                        color_ = (255, 0, 0)
-                    # Right
-                    else:
-                        output = model_right(image_ts).detach().cpu().numpy()
-                        color_ = (0, 0, 255)
+                    output = model_center(image_ts).detach().cpu().numpy()
+                    color_ = (0, 255, 0)
                                         
                 x, y = output[0]
                 x = (x / 2 + 0.5) * self._width
@@ -199,11 +165,8 @@ class Camera:
 
                 if self.stream:
                     if self.inference:
-                        annotated_frame = results[0].plot()
-                        cv2.circle(annotated_frame, (int(x), int(y)), radius=5, color=color_)
-                        cv2.imshow(self.window_title, annotated_frame)
-                    else:
-                        cv2.imshow(self.window_title, frame)
+                        cv2.circle(frame, (int(x), int(y)), radius=5, color=color_)
+                    cv2.imshow(self.window_title, frame)
 
                 #     if cv2.waitKey(1) == ord('q'):
                 #         break
@@ -214,14 +177,12 @@ class Camera:
                 if self.save:
                     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')
                     cv2.imwrite(str(self.save_path / f"ori_{timestamp}.jpg"), frame)
-                    cv2.imwrite(str(self.save_path / f"{timestamp}.jpg"), annotated_frame)
                 
                 if self.log:
-                    print(f'Determined class is {cls_dict[cls]}')
                     print(f'Inferenced road center is ({x:.1f}, {y:.1f})')
                     print(f"Real FPS: {1 / (time.time() - t0):.1f}")
                     
-                return x, cls
+                return x
                         
             except Exception as e:
                 print(e)
@@ -267,9 +228,6 @@ class Camera:
                         cv2.imshow(self.window_title, frame)
 
                         if cv2.waitKey(1) == ord('q'):
-                            break
-                        elif joystick.get_button(1):
-                            print("############### CAMERA OFF ###############")
                             break
                         
             except Exception as e:
@@ -349,30 +307,17 @@ if __name__ == '__main__':
     
     device = torch.device('cuda')
             
-    model_traffic_path = '/home/ircv3/HYU-2024-Embedded/jetracer/model/yolov8n_traffic_sign_20240510_e32b16_v2.pt'
-    model_traffic = YOLO(model_traffic_path) 
     
     model_center = torchvision.models.alexnet(num_classes=2, dropout=0.0)
-    # model_center.load_state_dict(torch.load('/home/ircv3/HYU-2024-Embedded/jetracer/model/road_following_model_new2_e32.pth'))
-    model_center.load_state_dict(torch.load(f'/home/ircv3/HYU-2024-Embedded/jetracer/model/straight_best2.pth'))
+    # model_center.load_state_dict(torch.load('/home/ircv3/HYU-2024-Embedded/jetracer/model/straight_best1.pth'))
+    model_center.load_state_dict(torch.load('/home/ircv3/HYU-2024-Embedded/jetracer/model/straight_best2.pth'))
     model_center = model_center.to(device)
-    
-    model_left = torchvision.models.alexnet(num_classes=2, dropout=0.0)
-    model_left.load_state_dict(torch.load('/home/ircv3/HYU-2024-Embedded/jetracer/model/road_following_model_left_b8e64.pth'))
-    # model_left.load_state_dict(torch.load('/home/ircv3/HYU-2024-Embedded/jetracer/model/road_following_model_s_add1_left.pth'))
-    model_left = model_left.to(device)
-    
-    model_right = torchvision.models.alexnet(num_classes=2, dropout=0.0)
-    model_right.load_state_dict(torch.load('/home/ircv3/HYU-2024-Embedded/jetracer/model/road_following_model_right_b8e64.pth'))
-    # model_left.load_state_dict(torch.load('/home/ircv3/HYU-2024-Embedded/jetracer/model/road_following_model_s_add1_right.pth'))
-    model_right = model_right.to(device)
     
     def preprocess(image: Image):
         device = torch.device('cuda')    
         image = TEST_TRANSFORMS(image).to(device)
         return image[None, ...]
     
-    cls_dict = {0: 'bus', 1: 'crosswalk', 2: 'left', 3: 'right', 4: 'straight', 5: 'no_traffic_sign'}
         
 ## control
 running = True
@@ -384,18 +329,10 @@ integral_deque = deque(maxlen=30)
 car.steering_offset = -0.07
 steering_range = (-1.1, 1.1)
 
-drive = False
-
-bool_left, bool_right, bool_straight = False, False, False
-cnt_left, cnt_right, cnt_straight = 0, 0, 0
-
-import sys
-import termios
-import tty
+# drive = False
 
 pygame.init()
 pygame.joystick.init()
-
 
 joystick = pygame.joystick.Joystick(0)
 joystick.init()
@@ -405,7 +342,6 @@ car.throttle = 0.35
 time.sleep(0.2)
 car.throttle = 0
 
-
 throttle_zero = 0.2
 
 running = True
@@ -414,68 +350,15 @@ crosswalk_counter = 500
 bus_counter=500
 bus=1
 
-
 while True:
     pygame.event.pump()
     
     throttle = throttle_zero
-    x_sen, cls = cam.run(model_traffic, model_center, model_left, model_right, cls_dict, bool_left, bool_right)
-    # if x_sen < 0:
-    #     x_sen = 0
-    # elif x_sen > 960:
-    #     x_sen = 960
-    
-    cls = cls_dict[cls]
-
-    if cls == 'left' and cnt_left == 0 and bool_left == False:
-        bool_left = True
-        cnt_left += 1
-    elif bool_left:
-        cls = 'left'
-        cnt_left += 1
-        if cnt_left > 13: # if old model
-            bool_left = False
-            cnt_left = 0
-    elif cls == 'right' and cnt_right == 0 and bool_right == False:
-        bool_right = True
-        cnt_right += 1
-    elif bool_right:
-        cls = 'right'
-        cnt_right += 1
-        if cnt_right > 13:
-            bool_right = False
-            cnt_right = 0
-    elif cls == 'straight' and cnt_straight == 0 and bool_straight == False:
-        bool_straight = True
-        cnt_straight += 1
-    elif bool_straight:
-        cls = 'straight'
-        cnt_straight += 1
-        if cnt_straight > 13:
-            bool_straight = False
-            cnt_straight = 0
-
-    if cls == 'bus':
-        throttle+=0.1*bus-0.05
-        bus= -bus
-        
-
-    # crosswalk 조건을 확인할지 여부를 체크
-    if crosswalk_counter >= 1000:
-        if cls == 'crosswalk':
-            car.throttle = 0
-
-            time.sleep(2)
-            throttle+=0.1
-            # crosswalk 감지 후 카운터 리셋
-            crosswalk_counter = 0
-
-    # 루프 반복마다 카운터 증가
-    crosswalk_counter += 10
-
-    # 카운터가 너무 커지지 않도록 최대 값을 제한
-    if crosswalk_counter > 1000:
-        crosswalk_counter = 1000
+    x_sen= cam.run(model_center)
+    if x_sen < 0:
+        x_sen = 0
+    elif x_sen > 960:
+        x_sen = 960
 
     if(joystick.get_button(7)):
         throttle_zero+=0.001
@@ -491,11 +374,9 @@ while True:
             car.throttle = 0
             time.sleep(0.5)
 
-
     if running==False:
         break
 
-    
     # PID 제어
     error = x_sen - 495
     integral_deque.append(error)
@@ -507,7 +388,6 @@ while True:
     elif integral < -8000:
         integral = -8000
     
-    # TODO: conflict with x_sen range
     if error > 500:
         car.steering = 1
         car.throttle = throttle
