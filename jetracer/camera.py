@@ -226,6 +226,8 @@ class Camera:
             #     exit()
                 
     def capt(self) -> None:
+        global mtx, dist
+        
         "Capture images for making custom dataset (chanju 240510)"
         
         if self.stream:
@@ -235,6 +237,7 @@ class Camera:
             save_num = 0
             try:
                 while True:
+                
                     pygame.event.pump()
                     t0 = time.time()
                     timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')
@@ -242,15 +245,18 @@ class Camera:
                     
                     if joystick.get_button(6):
                         self.save = True
-
-                    # if self.save:
-                    #     cv2.imwrite(f"{self.save_path}/{timestamp}.jpg", frame)
                         
-                    #     save_num += 1
-                    #     print(f'Save num: {save_num}')
-                    #     print(f'Save image: {self.save_path}/{timestamp}.jpg')
-                    #     time.sleep(0.5)
-                    #     self.save = False
+                    if cv2.waitKey(1) == ord('b'):
+                        self.save = True
+
+                    if self.save:
+                        cv2.imwrite(f"{self.save_path}/{timestamp}.jpg", frame)
+                        
+                        save_num += 1
+                        print(f'Save num: {save_num}')
+                        print(f'Save image: {self.save_path}/{timestamp}.jpg')
+                        time.sleep(0.5)
+                        self.save = False
                     
                     if self.save:
                         timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')
@@ -260,6 +266,21 @@ class Camera:
                         print(f"FPS: {1 / (time.time() - t0):.2f}")
 
                     if self.stream:
+                            # 이미지 크기
+                        h, w = frame.shape[:2]
+
+                        # 새로운 카메라 행렬 계산
+                        newcameramtx, _ = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
+
+                        # 왜곡 보정
+                        dst = cv2.undistort(frame, mtx, dist, None, newcameramtx)
+                        
+                        combined_image = cv2.hconcat([frame, dst])
+
+                        # 결합된 이미지를 표시
+                        # cv2.imshow('Combined Image', combined_image)
+                        
+                        # cv2.imshow(self.window_title, dst)
                         cv2.imshow(self.window_title, frame)
 
                         if cv2.waitKey(1) == ord('q'):
@@ -329,6 +350,13 @@ if __name__ == '__main__':
         log = args.log,
         capture = args.capture,
         inference = args.inference)
+    import pickle
+
+    # 카메라 캘리브레이션 결과 로드
+    with open('calibration_data.pkl', 'rb') as f:
+        calib_data = pickle.load(f)
+    mtx = np.array(calib_data['I'])
+    dist = np.array(calib_data['dist'])
     
     if args.inference: 
         
