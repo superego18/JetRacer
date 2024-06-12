@@ -159,11 +159,12 @@ class Camera:
             results = model_cup.predict(frame)
             
             # blue_bool, red_bool = False, False
+            red_cups_3d, blue_cups_3d = [], []
             
             if results[0].__dict__['boxes'].shape[0] >0 :
                 
                 red_cups_pts = []
-                blue_cups_pts =[]
+                blue_cups_pts = []
             
                 for bbox in results[0].__dict__['boxes']:
                     if bbox.conf >= 0.3:
@@ -407,10 +408,7 @@ if __name__ == '__main__':
 ## control
 running = True
 
-prev_error = 0.0
-integral = 0.0
-integral_deque = deque(maxlen=30)
-
+prev_steering = 0
 car.steering_offset = -0.07
 steering_range = (-1.1, 1.1)
 
@@ -441,13 +439,103 @@ while True:
     throttle = throttle_zero
     blue_pts, red_pts = cam.run()
     
-    
-    ####################### 여기서부터 수정 ######################
-    if x_sen < 0:
-        x_sen = 0
-    elif x_sen > 960:
-        x_sen = 960
+    ####################### 여기서부터 수정 ###################### 
+    # y축 방향은 왼쪽, 파란컵은 오른쪽
+    if len(blue_pts) == 0:
+        blue_pts = np.array([[0, -30]])
+        
+    else:
+        blue_pts = np.append(blue_pts, [[0, -30]], axis=0)
+        
+    if len(red_pts) == 0:
+        red_pts = np.array([[0, 30]])
+        
+    else:
+        red_pts = np.append(red_pts, [[0, 30]], axis=0)
+        
+    # x, y 좌표 분리
+    blue_x = blue_pts[:, 0]
+    blue_y = blue_pts[:, 1]
+    red_x = red_pts[:, 0]
+    red_y = red_pts[:, 1]
 
+    # 다항식 차수 (점의 개수 - 1)
+    degree_blue = len(blue_x) - 1
+    degree_red = len(red_x) - 1
+    max_degree = max(degree_blue, degree_red)
+
+    # 다항식 피팅
+    if degree_blue == 0 and degree_red == 0:
+        car.steering = prev_steering
+        car.throttle = throttle
+        continue
+
+    elif degree_blue == 0 and degree_red != 0:
+        red_poly = np.polyfit(red_x, red_y, max_degree)
+        blue_poly = red_poly.copy()
+        blue_poly[-1] *= -1
+        # print("Blue polynomial:", blue_poly)
+        
+    elif degree_blue != 0 and degree_red == 0:
+        blue_poly = np.polyfit(blue_x, blue_y, max_degree)
+        red_poly = blue_poly.copy()
+        red_poly[-1] *= -1
+        # print("Red polynomial:", red_poly)
+
+    else:
+        blue_poly = np.polyfit(blue_x, blue_y, max_degree)
+        red_poly = np.polyfit(red_x, red_y, max_degree)
+
+    # 다항식 중앙값 -> heading error and distanse_error
+    mid_poly = (blue_poly + red_poly) / 2
+    derivative_coeffs = np.polyder(mid_poly) # 다항식의 도함수의 계수 계산
+    slope_at_zero = np.polyval(derivative_coeffs, 0) # x = 0에서의 기울기 계산
+    angle_in_radians = np.arctan(slope_at_zero) # 기울기를 라디안 각도로 변환
+    # TODO 현재 따라가야할 경로의 y절편을 사용하는데, x축이 차량의 종방향이므로 그렇게 설정함.
+    distance_error = mid_poly[-1] # [cm] # y 절편은 다항식의 상수 항
+
+    # # 다항식 그리기
+    # # x 값 범위 설정
+    # x_new = np.linspace(0, 4, 100)
+
+    # # 다항식 평가
+    # blue_y_new = np.polyval(blue_poly, x_new)
+    # red_y_new = np.polyval(red_poly, x_new)
+    # mid_y_new = np.polyval(mid_poly, x_new)
+
+    # plt.plot(blue_x, blue_y, 'o', label='Blue points')
+    # plt.plot(x_new, blue_y_new, label='Blue polynomial')
+    # plt.plot(red_x, red_y, 'o', label='Red points')
+    # plt.plot(x_new, red_y_new, label='Red polynomial')
+    # plt.plot(x_new, mid_y_new, '--', label='Mid polynomial')
+    # plt.legend()
+    # plt.show()
+    
+    # # 결과 출력
+    # # 중앙값 다항식 출력
+    # print("Mid polynomial coefficients:", mid_poly)
+    # print("Slope at x = 0:", slope_at_zero)
+    # print("Angle at x = 0 (in degrees):", np.degrees(angle_in_randians))
+    # TODO k or vx 튜닝 수정
+    k = 1 # 튜닝해야함
+    vx = 150 # [cm/s]
+    psi = angle_in_radians
+    ctr_term = np.arctan2(k*distance_error, vx)
+    
+    steering_angle = psi + ctr_term # radian 기준
+    steering_angle_degrees = np.degrees(steering_angle) # degrees로 바꾸기
+    
+    # TODO 22 수정
+    if steering_angle_degrees > 22:
+        car.steering = 0.6
+        
+    elif steering_angle_degrees < -22:
+        car.steering = -0.6
+    
+    # TODO 44 수정    
+    car.steering = steering_angle_degrees/44
+    
+    
     if(joystick.get_button(7)):
         throttle_zero+=0.001
     if(joystick.get_button(6)):
@@ -465,38 +553,5 @@ while True:
     if running==False:
         break
 
-    # PID 제어
-    error = x_sen - 495
-    integral_deque.append(error)
-    integral = sum(integral_deque)
-    derivative = error - prev_error
-    
-    if integral > 8000:
-        integral = 8000
-    elif integral < -8000:
-        integral = -8000
-    
-    if error > 500:
-        car.steering = 1
-        car.throttle = throttle
-    elif error < -500:
-        car.steering = -1
-        car.throttle = throttle
-    else:
-        steering = error / 450 + integral / 40000 + derivative / 400
-        # if steering > 0:
-        #     car.steering = steering * 1.2
-        # else:
-        #     car.steering = steering
-            
-        car.steering = steering
-        car.throttle = throttle
-            
-        print(f"error : {error/450}")
-        print(f"integral : {integral/40000}")
-        print(f"derivative : {derivative/500}")
-        print(f"steering : {car.steering}")
-        print(f"x_sen : {x_sen}")
-        
-    prev_error = error
-
+    car.throttle = throttle
+    prev_steering = car.steering
