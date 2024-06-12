@@ -143,45 +143,45 @@ class Camera:
 
         if self.cap[0].isOpened():
             
-            try:
+            # try:
                 
-                while True:
-                    pygame.event.pump()
-                    
-                    t0 = time.time()
-                    
-                    _, frame = self.cap[0].read()
-                    
-                    # img = torch.tensor(frame).unsqueeze(3).to(device)
-                    
-                    # print(img.shape)
+            #     while True:
+            pygame.event.pump()
+            
+            t0 = time.time()
+            
+            _, frame = self.cap[0].read()
+            
+            # img = torch.tensor(frame).unsqueeze(3).to(device)
+            
+            # print(img.shape)
 
-                    results = model_cup.predict(frame)
-                    
-                    blue_bool, red_bool = False, False
-                    
-                    if results[0].__dict__['boxes'].shape[0] >0 :
-                        
-                        red_cups_pts = []
-                        blue_cups_pts =[]
-                    
-                        for bbox in results[0].__dict__['boxes']:
-                            if bbox.conf >= 0.3:
-                                x = (float(bbox.xywhn[0][0])) * 960
-                                y = (float(bbox.xywhn[0][1]) + float(bbox.xywhn[0][3])/2) * 540
-                                if int(bbox.cls.item()) == 0:
-                                    blue_cups_pts.append([x,y])
-                                else:
-                                    red_cups_pts.append([x,y])
-                                    
-                        if len(red_cups_pts) > 0:    
-                            red_cups_3d = undis_homo(red_cups_pts)
-                            red_bool = True
-                        if len(blue_cups_pts) > 0:
-                            blue_cups_3d = undis_homo(blue_cups_pts)
-                            blue_bool = True
+            results = model_cup.predict(frame)
+            
+            # blue_bool, red_bool = False, False
+            
+            if results[0].__dict__['boxes'].shape[0] >0 :
+                
+                red_cups_pts = []
+                blue_cups_pts =[]
+            
+                for bbox in results[0].__dict__['boxes']:
+                    if bbox.conf >= 0.3:
+                        x = (float(bbox.xywhn[0][0])) * 960
+                        y = (float(bbox.xywhn[0][1]) + float(bbox.xywhn[0][3])/2) * 540
+                        if int(bbox.cls.item()) == 0:
+                            blue_cups_pts.append([x,y])
+                        else:
+                            red_cups_pts.append([x,y])
                             
+                if len(red_cups_pts) > 0:    
+                    red_cups_3d = undis_homo(red_cups_pts)
+                    # red_bool = True
+                if len(blue_cups_pts) > 0:
+                    blue_cups_3d = undis_homo(blue_cups_pts)
+                    # blue_bool = True
                             
+                    '''   
                     if self.stream:
                         frame_3d = np.ones((540, 800, 3), dtype=np.uint8) * 255 # 매 프레임 초기화 # 54cm * 80cm  # h,w
                         annotated_frame = results[0].plot()
@@ -214,7 +214,6 @@ class Camera:
                                 cv2.circle(frame_3d, (int(y), int(x)), radius=35, color=(255,0,0))
                                 cv2.putText(frame_3d, txt, (int(y), int(x)), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=(0, 0, 0)) #  font, font_scale, color, thickness
 
-                        
                             # # 3d
                             # x_values = [pt[0] for pt in blue_cups_3d]
                             # y_values = [pt[1]+3.5 for pt in blue_cups_3d]
@@ -229,30 +228,36 @@ class Camera:
                         # plt.title('Scatter Plot with Points')
                         # plt.grid(True)
                         # plt.show()
+                         
 
                     if cv2.waitKey(1) == ord('q'):
                         break
+                        
                     # if joystick.get_button(1):
                     #     print("############### CAMERA OFF ###############")
                     #     break
                     
+                    
                     if self.save:
                         timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')
                         cv2.imwrite(str(self.save_path / f"ori_{timestamp}.jpg"), frame)
+                    '''
                     
-                    if self.log:
-                        print(f'Inferenced road center is ({x:.1f}, {y:.1f})')
-                        print(f"Real FPS: {1 / (time.time() - t0):.1f}")
+                if self.log:
+                    print(f'Inferenced road center is ({x:.1f}, {y:.1f})')
+                    print(f"Real FPS: {1 / (time.time() - t0):.1f}")
                         
-            except Exception as e:
-                print(e)
-                print('error is occured')
+            # except Exception as e:
+            #     print(e)
+            #     print('error is occured')
 
-            finally:
-                # TODO: Revise cam release
-                self.cap[0].release()
-                cv2.destroyAllWindows()
-                exit()
+            # finally:
+            #     # TODO: Revise cam release
+            #     self.cap[0].release()
+            #     cv2.destroyAllWindows()
+            #     exit()
+                
+            return blue_cups_3d, red_cups_3d
                 
     def capt(self) -> None:
         "Capture images for making custom dataset (chanju 240510)"
@@ -430,15 +435,14 @@ crosswalk_counter = 500
 bus_counter=500
 bus=1
 
-cam.run()
-
-exit()
-
 while True:
     pygame.event.pump()
     
     throttle = throttle_zero
-    x_sen= cam.run(model_center)
+    blue_pts, red_pts = cam.run()
+    
+    
+    ####################### 여기서부터 수정 ######################
     if x_sen < 0:
         x_sen = 0
     elif x_sen > 960:
