@@ -132,7 +132,9 @@ class Camera:
             )
         )
 
-    def run(self, model_center=None) -> None:
+    def run(self) -> None:
+        
+        global device, model_cup 
         
         print("############### CAMERA ON ###############")
         
@@ -142,57 +144,115 @@ class Camera:
         if self.cap[0].isOpened():
             
             try:
-                pygame.event.pump()
                 
-                t0 = time.time()
-                
-                _, frame = self.cap[0].read()
-
-                # if self.inference:
+                while True:
+                    pygame.event.pump()
                     
-                # Choose the right model according to the traffic sign
-                pil_image = Image.fromarray(frame)
-                
-                with torch.no_grad():
-                    image_ts = preprocess(pil_image)
-                
-                    output = model_center(image_ts).detach().cpu().numpy()
-                    color_ = (0, 255, 0)
-                                        
-                x, y = output[0]
-                x = (x / 2 + 0.5) * self._width
-                y = (y / 2 + 0.5) * self._height
-
-                if self.stream:
-                    if self.inference:
-                        cv2.circle(frame, (int(x), int(y)), radius=5, color=color_)
-                    cv2.imshow(self.window_title, frame)
-
-                #     if cv2.waitKey(1) == ord('q'):
-                #         break
-                # if joystick.get_button(1):
-                #     print("############### CAMERA OFF ###############")
-                #     break
-                
-                if self.save:
-                    timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')
-                    cv2.imwrite(str(self.save_path / f"ori_{timestamp}.jpg"), frame)
-                
-                if self.log:
-                    print(f'Inferenced road center is ({x:.1f}, {y:.1f})')
-                    print(f"Real FPS: {1 / (time.time() - t0):.1f}")
+                    t0 = time.time()
                     
-                return x
+                    _, frame = self.cap[0].read()
+                    
+                    # img = torch.tensor(frame).unsqueeze(3).to(device)
+                    
+                    # print(img.shape)
+
+                    results = model_cup.predict(frame)
+                    
+                    blue_bool, red_bool = False, False
+                    
+                    if results[0].__dict__['boxes'].shape[0] >0 :
+                        
+                        red_cups_pts = []
+                        blue_cups_pts =[]
+                    
+                        for bbox in results[0].__dict__['boxes']:
+                            if bbox.conf >= 0.3:
+                                x = (float(bbox.xywhn[0][0])) * 960
+                                y = (float(bbox.xywhn[0][1]) + float(bbox.xywhn[0][3])/2) * 540
+                                if int(bbox.cls.item()) == 0:
+                                    blue_cups_pts.append([x,y])
+                                else:
+                                    red_cups_pts.append([x,y])
+                                    
+                        if len(red_cups_pts) > 0:    
+                            red_cups_3d = undis_homo(red_cups_pts)
+                            red_bool = True
+                        if len(blue_cups_pts) > 0:
+                            blue_cups_3d = undis_homo(blue_cups_pts)
+                            blue_bool = True
+                            
+                            
+                    if self.stream:
+                        frame_3d = np.ones((540, 800, 3), dtype=np.uint8) * 255 # 매 프레임 초기화 # 54cm * 80cm  # h,w
+                        annotated_frame = results[0].plot()
+                        # plt.figure()
+                        if red_bool:
+                            for pt in red_cups_pts:
+                                cv2.circle(annotated_frame, (int(pt[0]), int(pt[1])), radius=5, color=(0, 0, 255), thickness=-1)
+                            for pt in red_cups_3d:
+                                x = 540 - (pt[0]+3.5)*10
+                                y = 400 - pt[1]*10
+                                x_txt = round(pt[0]+3.5,1)
+                                y_txt = round(pt[1],1)
+                                txt = f'x, y: ({x_txt}, {y_txt})cm'
+                                cv2.circle(frame_3d, (int(y), int(x)), radius=35, color=(0,0,255))
+                                cv2.putText(frame_3d, txt, (int(y), int(x)), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=(0, 0, 0)) #  font, font_scale, color, thickness
+
+                            # # 3d
+                            # x_values = [pt[0] for pt in red_cups_3d]
+                            # y_values = [pt[1]+3.5 for pt in red_cups_3d]
+                            # plt.scatter(x_values, y_values, color='red')
+                        if blue_bool:
+                            for pt in blue_cups_pts:
+                                cv2.circle(annotated_frame, (int(pt[0]), int(pt[1])), radius=5, color=(255, 0, 0), thickness=-1)
+                            for pt in blue_cups_3d:
+                                x = 540 - (pt[0]+3.5)*10
+                                y = 400 - pt[1]*10
+                                x_txt = round(pt[0]+3.5,1)
+                                y_txt = round(pt[1],1)
+                                txt = f'x, y: ({x_txt}, {y_txt})cm'
+                                cv2.circle(frame_3d, (int(y), int(x)), radius=35, color=(255,0,0))
+                                cv2.putText(frame_3d, txt, (int(y), int(x)), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=(0, 0, 0)) #  font, font_scale, color, thickness
+
+                        
+                            # # 3d
+                            # x_values = [pt[0] for pt in blue_cups_3d]
+                            # y_values = [pt[1]+3.5 for pt in blue_cups_3d]
+                            # plt.scatter(x_values, y_values, color='red')
+                            
+                        # cv2.imshow(self.window_title, annotated_frame)
+                        combined_image = cv2.hconcat([annotated_frame, frame_3d])
+                        cv2.imshow('Combined Image', combined_image)
+                        
+                        # plt.xlabel('X')
+                        # plt.ylabel('Y')
+                        # plt.title('Scatter Plot with Points')
+                        # plt.grid(True)
+                        # plt.show()
+
+                    if cv2.waitKey(1) == ord('q'):
+                        break
+                    # if joystick.get_button(1):
+                    #     print("############### CAMERA OFF ###############")
+                    #     break
+                    
+                    if self.save:
+                        timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S%f')
+                        cv2.imwrite(str(self.save_path / f"ori_{timestamp}.jpg"), frame)
+                    
+                    if self.log:
+                        print(f'Inferenced road center is ({x:.1f}, {y:.1f})')
+                        print(f"Real FPS: {1 / (time.time() - t0):.1f}")
                         
             except Exception as e:
                 print(e)
                 print('error is occured')
 
-            # finally:
-            #     # TODO: Revise cam release
-            #     self.cap[0].release()
-            #     cv2.destroyAllWindows()
-            #     exit()
+            finally:
+                # TODO: Revise cam release
+                self.cap[0].release()
+                cv2.destroyAllWindows()
+                exit()
                 
     def capt(self) -> None:
         "Capture images for making custom dataset (chanju 240510)"
@@ -301,24 +361,44 @@ if __name__ == '__main__':
     
     from ultralytics import YOLO
     import torch
-    import torchvision
-    from PIL import Image
-    from cnn.center_dataset import TEST_TRANSFORMS
+    import pickle
+    import matplotlib.pyplot as plt
     
     device = torch.device('cuda')
             
+    model_cup_path = '/home/ircv3/HYU-2024-Embedded/jetracer/model/yolo_traffic_cup.pt'
+    model_cup = YOLO(model_cup_path)
+    # model_cup = model_cup.to(device)
     
-    model_center = torchvision.models.alexnet(num_classes=2, dropout=0.0)
-    # model_center.load_state_dict(torch.load('/home/ircv3/HYU-2024-Embedded/jetracer/model/straight_best1.pth'))
-    model_center.load_state_dict(torch.load('/home/ircv3/HYU-2024-Embedded/jetracer/model/straight_best2.pth'))
-    model_center = model_center.to(device)
+    with open('calibration_data.pkl', 'rb') as f:
+        calib_data = pickle.load(f)
+
+    mtx = np.array(calib_data['I'])
+    dist = np.array(calib_data['dist'])
+
+    with open('homography_data.pkl', 'rb') as f:
+        homo_data = pickle.load(f)
+
+    H = np.array(homo_data['H'])
     
-    def preprocess(image: Image):
-        device = torch.device('cuda')    
-        image = TEST_TRANSFORMS(image).to(device)
-        return image[None, ...]
-    
+    def undis_homo(pts):
         
+        global mtx, dist, H
+                
+        dist_pts = np.array(pts, dtype=np.float32)
+        undist_pts = cv2.undistortPoints(dist_pts, mtx, dist) # (n, 1, 2)
+
+        x2 = (undist_pts[:, :, 0] + 1) / 2 * 960 # (2, 1)
+        y2 = (undist_pts[:, :, 1] + 1) / 2 * 540
+
+        undist_pts = np.hstack([x2, y2], dtype=np.float32) # (n, 2)
+
+        pts_homo = np.concatenate([undist_pts, np.ones((undist_pts.shape[0], 1))], axis=1)
+        pts_tran_homo = np.dot(H, pts_homo.T).T
+        pts_tran = pts_tran_homo[:, :2] / pts_tran_homo[:, 2:] # (n, 2)
+
+        return pts_tran
+    
 ## control
 running = True
 
@@ -349,6 +429,10 @@ paused = False
 crosswalk_counter = 500
 bus_counter=500
 bus=1
+
+cam.run()
+
+exit()
 
 while True:
     pygame.event.pump()
