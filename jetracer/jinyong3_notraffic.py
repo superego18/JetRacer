@@ -38,7 +38,7 @@ class Camera:
         height: int = 1080, # input # do not revise
         _width: int = 960, # output
         _height: int = 540, # output
-        frame_rate: int = 10,
+        frame_rate: int = 13,
         flip_method: int = 0, # do not flip (ex: 2 --> flip by vertex)
         window_title: str = "Camera",
         save_path: str = "record",
@@ -138,10 +138,13 @@ class Camera:
         
         cnt1 +=1
         
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+                
+        
         print("############### CAMERA ON ###############")
         
-        if self.stream:
-            cv2.namedWindow(self.window_title)
+        # if self.stream:
+        #     cv2.namedWindow(self.window_title)
 
         if self.cap[0].isOpened():
             
@@ -169,7 +172,7 @@ class Camera:
                 blue_cups_pts = []
             
                 for bbox in results[0].__dict__['boxes']:
-                    if bbox.conf >= 0.3:
+                    if bbox.conf >= 0.5:
                         x = (float(bbox.xywhn[0][0])) * 960
                         y = (float(bbox.xywhn[0][1]) + float(bbox.xywhn[0][3])/2) * 540
                         if int(bbox.cls.item()) == 0:
@@ -193,12 +196,12 @@ class Camera:
                         for pt in red_cups_pts:
                             cv2.circle(annotated_frame, (int(pt[0]), int(pt[1])), radius=5, color=(0, 0, 255), thickness=-1)
                         for pt in red_cups_3d:
-                            x = 540 - (pt[0]+3.5)*10
-                            y = 400 - pt[1]*10
+                            x = 540 - (pt[0]+3.5)*3
+                            y = 400 - pt[1]*3
                             x_txt = round(pt[0]+3.5,1)
                             y_txt = round(pt[1],1)
                             txt = f'x, y: ({x_txt}, {y_txt})cm'
-                            cv2.circle(frame_3d, (int(y), int(x)), radius=35, color=(0,0,255))
+                            cv2.circle(frame_3d, (int(y), int(x)), radius=10, color=(0,0,255))
                             cv2.putText(frame_3d, txt, (int(y), int(x)), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=(0, 0, 0)) #  font, font_scale, color, thickness
 
                         # # 3d
@@ -209,12 +212,12 @@ class Camera:
                         for pt in blue_cups_pts:
                             cv2.circle(annotated_frame, (int(pt[0]), int(pt[1])), radius=5, color=(255, 0, 0), thickness=-1)
                         for pt in blue_cups_3d:
-                            x = 540 - (pt[0]+3.5)*10
-                            y = 400 - pt[1]*10
+                            x = 540 - (pt[0]+3.5)*3
+                            y = 400 - pt[1]*3
                             x_txt = round(pt[0]+3.5,1)
                             y_txt = round(pt[1],1)
                             txt = f'x, y: ({x_txt}, {y_txt})cm'
-                            cv2.circle(frame_3d, (int(y), int(x)), radius=35, color=(255,0,0))
+                            cv2.circle(frame_3d, (int(y), int(x)), radius=10, color=(255,0,0))
                             cv2.putText(frame_3d, txt, (int(y), int(x)), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.5, color=(0, 0, 0)) #  font, font_scale, color, thickness
 
                         # # 3d
@@ -231,10 +234,9 @@ class Camera:
                     # plt.title('Scatter Plot with Points')
                     # plt.grid(True)
                     # plt.show()
+                
                     
-                    
-                    
-                    return blue_cups_3d, red_cups_3d, combined_image
+                    cv2.imwrite(f'/home/ircv3/HYU-2024-Embedded/jetracer/capture/ss/{timestamp}__.png', combined_image)
                          
                     # if cv2.waitKey(1) == ord('q'):
                     #     break
@@ -263,8 +265,10 @@ class Camera:
             #     self.cap[0].release()
             #     cv2.destroyAllWindows()
             #     exit()
+            
+                           
                 
-            return blue_cups_3d, red_cups_3d, None
+            return blue_cups_3d, red_cups_3d, timestamp
                 
     def capt(self) -> None:
         "Capture images for making custom dataset (chanju 240510)"
@@ -378,10 +382,11 @@ if __name__ == '__main__':
     import pickle
     import matplotlib.pyplot as plt
     from datetime import datetime
+    import time
     
     device = torch.device('cuda')
             
-    model_cup_path = '/home/ircv3/HYU-2024-Embedded/jetracer/model/yolo_traffic_cup2.pt'
+    model_cup_path = '/home/ircv3/HYU-2024-Embedded/jetracer/model/yolo_traffic_cup3.pt'
     model_cup = YOLO(model_cup_path)
     # model_cup = model_cup.to(device)
     
@@ -443,13 +448,14 @@ bus_counter=500
 bus=1
 throttle = throttle_zero
 
-k = 10 # TODO 튜닝해야함
+k = 1.6 # TODO 튜닝해야함
 vx = 150 # [cm/s]
 
 psi_deque = deque(maxlen=1)
 distance_error_deque = deque(maxlen=1)
+steering_angle_degrees_deque = deque(maxlen=2)
 
-def weighted_moving_average(values, alpha=0.5):
+def weighted_moving_average(values, alpha=0.4):
     weighted_sum = 0.0
     weight_sum = 0.0
     n = len(values)
@@ -460,32 +466,41 @@ def weighted_moving_average(values, alpha=0.5):
 
     return weighted_sum / weight_sum
 
+prev_error = 0.0
+error = 0.0
+integral = 0.0
+integral_deque = deque(maxlen=10)
+kd=1
+
+width_10 = 60
 
 while True:
     try:
+        
+        st = time.time()
         pygame.event.pump()
         
-        blue_pts, red_pts, _ = cam.run()
+        blue_pts, red_pts, timestamp = cam.run()
         
         ####################### 여기서부터 수정 ###################### 
         # y축 방향은 왼쪽, 파란컵은 오른쪽
-        
+        y_i = 100
         if len(blue_pts) == 0:
             # blue_pts = perv_blue_pts
-            blue_pts = np.array([[0, -25], [-25, -25]])
+            blue_pts = np.array([[-50, -y_i], [-25, -y_i]])
             
         else:
-            blue_pts = np.append(blue_pts, [[0, -25], [-25, -25]], axis=0)
+            blue_pts = np.append(blue_pts, [[-50, -y_i], [-25, -y_i]], axis=0)
             
         if len(red_pts) == 0:
             # red_pts = prev_red_pts
-            red_pts = np.array([[0, 25], [-25, 25]])
+            red_pts = np.array([[-50, y_i], [-25, y_i]])
             
         else:
-            red_pts = np.append(red_pts, [[0, 25], [-25, 25]], axis=0)
+            red_pts = np.append(red_pts, [[-50, y_i], [-25, y_i]], axis=0)
             
         # x 값이 200 이상인 배열 제거
-        max_x_value = 200
+        max_x_value = 300
         
         blue_pts = blue_pts[blue_pts[:, 0] < max_x_value]
         red_pts = red_pts[red_pts[:, 0] < max_x_value]
@@ -525,22 +540,30 @@ while True:
             
         else:
             # # 빨간색만 봤을 때
+            
+            x_i = 120
+            
             if degree_blue == 1 and degree_red != 1:
                 red_poly = np.polyfit(red_x, red_y, max_degree)
                 blue_poly = red_poly.copy()
-                blue_poly[-1] = min(blue_poly[-1] - 40, 40)
-                # print("Blue polynomial:", blue_poly)
+                blue_poly[-1] = blue_poly[-1] - 120 + blue_poly[0]*(x_i^2) + blue_poly[1]*x_i
+                # blue_poly[-1] *= -1
+                # print("Blue polynomial:", blue_poly) 
             
             # 파란색만 봤을 때
             elif degree_blue != 1 and degree_red == 1:
                 blue_poly = np.polyfit(blue_x, blue_y, max_degree)
                 red_poly = blue_poly.copy()
-                red_poly[-1] = max(red_poly[-1] +40,40)
+                red_poly[-1] = red_poly[-1] + 120 + red_poly[0]*(x_i^2) + red_poly[1]*x_i
+                # red_poly[-1] *= -1
                 # print("Red polynomial:", red_poly)
 
             else:
                 blue_poly = np.polyfit(blue_x, blue_y, max_degree)
                 red_poly = np.polyfit(red_x, red_y, max_degree)
+                
+            width_10 = np.polyval(red_poly, 10) - np.polyval(blue_poly, 10)
+            print(width_10)
 
             # 다항식 중앙값 -> heading error and distanse_error
             mid_poly = (blue_poly + red_poly) / 2
@@ -548,20 +571,43 @@ while True:
             slope_at_zero = np.polyval(derivative_coeffs, 0) # x = 0에서의 기울기 계산
             angle_in_degrees = np.degrees(np.arctan(slope_at_zero)) # 기울기를 라디안 각도로 변환
             # TODO 현재 따라가야할 경로의 y절편을 사용하는데, x축이 차량의 종방향이므로 그렇게 설정함.
-            distance_error = mid_poly[-1] # [cm] # y 절편은 다항식의 상수 항
+            distance_error = -mid_poly[-1] # [cm] # y 절편은 다항식의 상수 항
             
 
-            psi_deque.append(angle_in_degrees)
+            psi_deque.append(-angle_in_degrees)
             psi = weighted_moving_average(psi_deque)
             
-            if distance_error*angle_in_degrees < 0 and abs(distance_error) < 20:
-                distance_error = 0
+            # if distance_error*angle_in_degrees < 0 and abs(distance_error) < 20:
+            #     distance_error = 0
+            #     psi = psi/2
             
             distance_error_deque.append(distance_error)
             ctr_term = np.degrees(np.arctan2(k*weighted_moving_average(distance_error_deque), vx))
 
-            steering_angle_degrees = -psi - ctr_term # degrees 기준
+            # steering_angle_degrees = -psi - ctr_term # degrees 기준
             
+                # PID 제어
+            error = psi + ctr_term
+            integral_deque.append(error)
+            integral = sum(integral_deque)
+            derivative = error - prev_error
+            
+            if integral > 500:
+                integral = 500
+            elif integral < -500:
+                integral = -500
+            
+            kp = 0.7
+            ki = 0.02
+            kd = 1.8
+            steering_angle_degrees = kp*error + ki*integral + kd*derivative
+            
+            # TODO: Stanely + PD
+            # steering_angle_degrees = kp*psi + kd*psi + ctr_term
+            # print(f'p: {kp*psi}, d: {kd*psi}, i: {ki*psi}, y_e: {ctr_term}')
+            steering_angle_degrees_deque.append(steering_angle_degrees)
+            steering_angle_degrees = weighted_moving_average(steering_angle_degrees_deque)
+            print(car.throttle, 'car.throttle')
             # TODO 22 수정
             if steering_angle_degrees > 50:
                 car.steering = 0.5
@@ -572,6 +618,7 @@ while True:
             # TODO 44 수정    
                 car.steering = steering_angle_degrees/100
 
+            print(f"P : {kp*error}, I : {ki*integral}. D : {kd*derivative}")
             # 결과 출력
             # 중앙값 다항식 출력
             # print("Mid polynomial coefficients : ", mid_poly)
@@ -583,6 +630,7 @@ while True:
             # print(f"steering angle : {steering_angle_degrees:>10.2f} degrees")
             # print(f"car.steering   : {car.steering:>10.2f}")
             
+
                 # 다항식 그리기
 
             # x_new = np.linspace(0, 200, 100)              
@@ -597,27 +645,23 @@ while True:
             # plt.plot(x_new, mid_y_new, '--', label='Mid polynomial', color='black')
             # plt.xlim(0, 200)
             # plt.ylim(-100, 100)
-            # plt.title(f'e_psi: {angle_in_degrees:>10.2f}, e_d: {distance_error:>10.2f}, psi: {psi:>10.2f}, c: {ctr_term:>10.2f}, k: {k:>10.2f},\nd: {steering_angle_degrees:>10.2f}, s: {car.steering:>10.2f}')
+            # plt.title(f'e_psi: {-angle_in_degrees:>10.2f}, e_d: {-distance_error:>10.2f}, psi: {-psi:>10.2f}, c: {-ctr_term:>10.2f}, k: {k:>10.2f},\nd: {steering_angle_degrees:>10.2f}, s: {car.steering:>10.2f}')
             # plt.legend()
-            # timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+            
             # plt.savefig(f'/home/ircv3/HYU-2024-Embedded/jetracer/capture/ss/{timestamp}.png')
             
             # plt.draw()
             # plt.pause(0.01)
-            
-            
-            
-            if _:
-                cv2.imwirte(f'/home/ircv3/HYU-2024-Embedded/jetracer/capture/ss/{timestamp}__.png', _)
+
             
         if(joystick.get_button(7)):
             throttle+=0.001
         if(joystick.get_button(6)):
             throttle-=0.001
         if(joystick.get_button(9)):
-            k=k*1.01
+            k += 0.1
         if(joystick.get_button(8)):
-            k=k*0.99
+            k -= 0.1
         while(joystick.get_button(0)):
             car.throttle = 0
             time.sleep(0.5)
@@ -625,6 +669,7 @@ while True:
 
         if(joystick.get_button(1)):
                 running = False
+                print(f"Kd:{kd}")
                 car.throttle = 0
                 time.sleep(0.5)
 
@@ -637,6 +682,9 @@ while True:
         prev_steering = car.steering
         perv_blue_pts = blue_pts
         prev_red_pts = red_pts
+        prev_error = error
     
-    except:
-        print('error')
+        print(time.time()-st)
+    except Exception as e:
+        print(f'{e}')
+        
